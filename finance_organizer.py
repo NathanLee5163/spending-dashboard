@@ -516,6 +516,75 @@ def full_category_list(grouped: dict[str, list[dict]]) -> list[dict]:
     return categories
 
 
+def build_calendar_summaries(transactions: list[dict]) -> list[dict]:
+    from calendar import monthrange
+
+    by_date: dict[str, list[dict]] = defaultdict(list)
+    for row in transactions:
+        date = normalize_date(row.get("Date", ""))
+        try:
+            datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            continue
+        by_date[date].append(row)
+
+    by_month: dict[str, dict[str, list[dict]]] = defaultdict(dict)
+    for date, items in by_date.items():
+        by_month[date[:7]][date] = items
+
+    calendars: list[dict] = []
+    for month in sorted(by_month.keys(), reverse=True):
+        year, mon = map(int, month.split("-"))
+        days_in_month = monthrange(year, mon)[1]
+        first_weekday = (datetime(year, mon, 1).weekday() + 1) % 7
+
+        days: list[dict] = []
+        for day_num in range(1, days_in_month + 1):
+            date_str = f"{month}-{day_num:02d}"
+            items = by_month[month].get(date_str, [])
+            total = sum(abs(parse_amount(item["Amount"])) for item in items)
+            days.append(
+                {
+                    "date": date_str,
+                    "day": day_num,
+                    "total": total,
+                    "count": len(items),
+                    "transactions": [
+                        {
+                            "date": date_str,
+                            "description": item.get("Description", ""),
+                            "amount": abs(parse_amount(item["Amount"])),
+                            "category": item.get("Category", "") or "Uncategorized",
+                            "color": category_color(item.get("Category", "")),
+                            "account": item.get("Account", ""),
+                            "source": item.get("_source", ""),
+                        }
+                        for item in sorted(items, key=lambda row: row.get("Description", ""))
+                    ],
+                }
+            )
+
+        recent: list[dict] = []
+        for day in sorted(days, key=lambda item: item["date"], reverse=True):
+            recent.extend(day["transactions"])
+        recent = recent[:12]
+
+        calendars.append(
+            {
+                "month": month,
+                "label": datetime(year, mon, 1).strftime("%B %Y"),
+                "short_label": datetime(year, mon, 1).strftime("%B").upper(),
+                "total": sum(day["total"] for day in days),
+                "first_weekday": first_weekday,
+                "days_in_month": days_in_month,
+                "days": days,
+                "recent": recent,
+            }
+        )
+
+    return calendars
+
+
 def analyze(transactions: list[dict]) -> dict:
     grouped = group_by_category(transactions)
     all_cats = full_category_list(grouped)
@@ -540,6 +609,7 @@ def analyze(transactions: list[dict]) -> dict:
         "unused_categories": unused_categories,
         "all_categories": STANDARD_CATEGORIES,
         "monthly": monthly,
+        "calendars": build_calendar_summaries(transactions),
     }
 
 

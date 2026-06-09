@@ -731,6 +731,196 @@
       opacity: 0.5;
     }
 
+    /* ── Spending calendar ── */
+    .calendar-section {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.35rem;
+      margin-bottom: 2rem;
+    }
+
+    .calendar-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      margin-bottom: 1.25rem;
+      flex-wrap: wrap;
+    }
+
+    .calendar-title-block .spent-label {
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .calendar-title-block .spent-total {
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin-top: 0.15rem;
+    }
+
+    .calendar-layout {
+      display: grid;
+      grid-template-columns: 1fr 300px;
+      gap: 1.5rem;
+    }
+
+    @media (max-width: 900px) {
+      .calendar-layout { grid-template-columns: 1fr; }
+    }
+
+    .calendar-weekdays {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 0.35rem;
+      margin-bottom: 0.35rem;
+    }
+
+    .calendar-weekdays span {
+      text-align: center;
+      font-size: 0.68rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .calendar-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 0.35rem;
+    }
+
+    .cal-day {
+      aspect-ratio: 1;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.02);
+      padding: 0.45rem 0.4rem;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.15rem;
+      transition: border-color 0.15s, transform 0.1s;
+      min-height: 58px;
+    }
+
+    .cal-day:hover:not(.cal-empty) {
+      border-color: var(--accent);
+      transform: translateY(-1px);
+    }
+
+    .cal-day.cal-empty {
+      border-color: transparent;
+      background: transparent;
+      cursor: default;
+    }
+
+    .cal-day.cal-selected {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px var(--accent-glow);
+    }
+
+    .cal-day-num {
+      font-size: 0.72rem;
+      font-weight: 600;
+      color: var(--muted);
+      align-self: flex-start;
+    }
+
+    .cal-day-amount {
+      font-size: 0.78rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .cal-day-amount.empty {
+      color: var(--muted);
+      font-weight: 500;
+      opacity: 0.45;
+    }
+
+    .calendar-side {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .day-detail-panel {
+      background: var(--surface-solid);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem;
+      flex: 1;
+    }
+
+    .panel-label {
+      font-size: 0.68rem;
+      font-weight: 600;
+      letter-spacing: 0.07em;
+      color: var(--muted);
+      text-transform: uppercase;
+      margin-bottom: 0.75rem;
+    }
+
+    .day-detail-header {
+      font-size: 0.95rem;
+      font-weight: 700;
+      margin-bottom: 0.75rem;
+    }
+
+    .day-detail-empty {
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+
+    .side-txn {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.65rem;
+      padding: 0.55rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .side-txn:last-child { border-bottom: none; }
+
+    .side-txn-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      margin-top: 0.35rem;
+      flex-shrink: 0;
+    }
+
+    .side-txn-info { flex: 1; min-width: 0; }
+
+    .side-txn-name {
+      font-size: 0.85rem;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .side-txn-meta {
+      font-size: 0.72rem;
+      color: var(--muted);
+      margin-top: 0.1rem;
+    }
+
+    .side-txn-amount {
+      font-size: 0.85rem;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      flex-shrink: 0;
+    }
+
     .hidden { display: none !important; }
 
     .error {
@@ -1054,6 +1244,98 @@
       }
     }
 
+    function formatDayLabel(dateStr) {
+      const d = new Date(dateStr + "T12:00:00");
+      return d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
+    }
+
+    function renderSideTxn(t) {
+      return `
+        <div class="side-txn">
+          <div class="side-txn-dot" style="background:${t.color || "#64748b"}"></div>
+          <div class="side-txn-info">
+            <div class="side-txn-name">${t.description}</div>
+            <div class="side-txn-meta">${t.category}${t.account ? " · " + t.account : ""}</div>
+          </div>
+          <div class="side-txn-amount">${money(t.amount)}</div>
+        </div>
+      `;
+    }
+
+    function initCalendar(calendars) {
+      if (!calendars || !calendars.length) return;
+
+      calendars.forEach((cal, index) => {
+        let selectedDate = null;
+        const grid = document.getElementById(`calendarGrid-${index}`);
+        const dayDetail = document.getElementById(`dayDetail-${index}`);
+        if (!grid || !dayDetail) return;
+
+        function pickDefaultDay() {
+          const withSpend = [...cal.days].reverse().find(d => d.count > 0);
+          return withSpend ? withSpend.date : cal.days[0].date;
+        }
+
+        function heatColor(total, maxTotal) {
+          if (total <= 0) return "rgba(255,255,255,0.02)";
+          const intensity = Math.min(total / maxTotal, 1);
+          const alpha = 0.12 + intensity * 0.55;
+          return `rgba(91, 141, 239, ${alpha})`;
+        }
+
+        function renderDayDetail() {
+          const day = cal.days.find(d => d.date === selectedDate);
+          if (!day || day.count === 0) {
+            dayDetail.innerHTML = `
+              <div class="panel-label">Day details</div>
+              <div class="day-detail-header">${formatDayLabel(selectedDate)}</div>
+              <div class="day-detail-empty">No spending on this day.</div>
+            `;
+            return;
+          }
+          dayDetail.innerHTML = `
+            <div class="panel-label">Day details</div>
+            <div class="day-detail-header">${formatDayLabel(day.date)} · ${money(day.total)}</div>
+            ${day.transactions.map(renderSideTxn).join("")}
+          `;
+        }
+
+        function renderCalendar() {
+          selectedDate = selectedDate || pickDefaultDay();
+          const maxDayTotal = Math.max(...cal.days.map(d => d.total), 1);
+
+          let cells = "";
+          for (let i = 0; i < cal.first_weekday; i++) {
+            cells += `<div class="cal-day cal-empty"></div>`;
+          }
+          for (const day of cal.days) {
+            const isSelected = day.date === selectedDate;
+            const amountClass = day.total > 0 ? "" : " empty";
+            const amountText = day.total > 0 ? money(day.total) : "—";
+            cells += `
+              <div class="cal-day${isSelected ? " cal-selected" : ""}"
+                   data-date="${day.date}"
+                   style="background:${heatColor(day.total, maxDayTotal)}">
+                <span class="cal-day-num">${day.day}</span>
+                <span class="cal-day-amount${amountClass}">${amountText}</span>
+              </div>
+            `;
+          }
+          grid.innerHTML = cells;
+          renderDayDetail();
+
+          grid.querySelectorAll(".cal-day[data-date]").forEach(el => {
+            el.addEventListener("click", () => {
+              selectedDate = el.dataset.date;
+              renderCalendar();
+            });
+          });
+        }
+
+        renderCalendar();
+      });
+    }
+
     function renderResults(data, title) {
       viewTitle.textContent = shortName(title);
       viewSubtitle.textContent = `${data.transaction_count} transactions · ${data.categories.length} active categories`;
@@ -1151,8 +1433,32 @@
             </div>
           </section>
         ` : ""}
+
+        ${(data.calendars || []).map((cal, i) => `
+        <section class="calendar-section">
+          <div class="calendar-top">
+            <div class="calendar-title-block">
+              <div class="spent-label">Spent in ${cal.short_label}</div>
+              <div class="spent-total">${money(cal.total)}</div>
+            </div>
+          </div>
+          <div class="calendar-layout">
+            <div>
+              <div class="calendar-weekdays">
+                <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span>
+                <span>Thu</span><span>Fri</span><span>Sat</span>
+              </div>
+              <div class="calendar-grid" id="calendarGrid-${i}"></div>
+            </div>
+            <div class="calendar-side">
+              <div class="day-detail-panel" id="dayDetail-${i}"></div>
+            </div>
+          </div>
+        </section>
+        `).join("")}
       `;
       resultsEl.classList.remove("hidden");
+      initCalendar(data.calendars);
     }
 
     async function exportExcel() {
