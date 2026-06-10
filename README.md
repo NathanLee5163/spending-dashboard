@@ -139,21 +139,6 @@ spending-dashboard/
 
 ---
 
-## Deploy online (optional)
-
-To share the app publicly, deploy to a free host like [Render](https://render.com):
-
-1. Push this repo to GitHub (already done if you're reading this there)
-2. On Render: **New → Web Service** → connect your repo
-3. Settings:
-   - **Build command:** `pip install -r requirements.txt`
-   - **Start command:** `gunicorn app:app`
-4. Deploy — you'll get a public URL
-
-On Render's free tier, the app sleeps after inactivity and takes ~30 seconds to wake up on the first visit.
-
----
-
 ## Privacy
 
 - CSV files are processed **in memory** and are **not saved** to disk by the app
