@@ -441,12 +441,16 @@
     /* ── Summary cards ── */
     .summary-cards {
       display: grid;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(4, 1fr);
       gap: 1rem;
       margin-bottom: 2rem;
     }
 
-    @media (max-width: 700px) {
+    @media (max-width: 900px) {
+      .summary-cards { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 520px) {
       .summary-cards { grid-template-columns: 1fr; }
     }
 
@@ -529,7 +533,8 @@
     .month-card-header {
       display: flex;
       justify-content: space-between;
-      align-items: center;
+      align-items: flex-start;
+      gap: 1rem;
       padding: 0.9rem 1.15rem;
       background: rgba(255,255,255,0.02);
       border-bottom: 1px solid var(--border);
@@ -540,11 +545,30 @@
       font-size: 0.95rem;
     }
 
-    .month-card-header .month-total {
-      font-weight: 700;
+    .month-metrics {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1rem;
+      justify-content: flex-end;
+      font-size: 0.8rem;
       font-variant-numeric: tabular-nums;
-      color: var(--success);
     }
+
+    .month-metrics span {
+      color: var(--muted);
+    }
+
+    .month-metrics strong {
+      color: var(--text);
+      font-weight: 700;
+    }
+
+    .amount-charge { color: #f87171; }
+    .amount-credit { color: #34d399; }
+    .amount-net-neg { color: #f87171; }
+    .amount-net-pos { color: #34d399; }
+
+    .txn-amount { font-weight: 600; font-variant-numeric: tabular-nums; }
 
     .month-bars {
       padding: 0.85rem 1.15rem 1rem;
@@ -762,6 +786,21 @@
       font-weight: 700;
       letter-spacing: -0.03em;
       margin-top: 0.15rem;
+    }
+
+    .calendar-month-stats {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1.25rem;
+      margin-top: 0.65rem;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+
+    .calendar-month-stats strong {
+      color: var(--text);
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
     }
 
     .calendar-layout {
@@ -1009,7 +1048,7 @@
         <div class="header-actions">
           <label class="checkbox">
             <input type="checkbox" id="expensesOnly" checked>
-            Expenses only
+            Expenses only (hide transfers &amp; payments)
           </label>
           <button class="btn btn-primary" id="exportBtn" disabled>Export Excel</button>
         </div>
@@ -1055,7 +1094,19 @@
     let combinedData = null;
     let nextId = 1;
 
-    const money = (n) => "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const money = (n) => "$" + Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const signedMoney = (n) => {
+      const value = money(n);
+      if (n > 0) return "+" + value;
+      if (n < 0) return "-" + value;
+      return value;
+    };
+    const amountClass = (n) => {
+      if (n > 0) return "amount-credit";
+      if (n < 0) return "amount-charge";
+      return "";
+    };
+    const netClass = (n) => (n > 0 ? "amount-net-pos" : n < 0 ? "amount-net-neg" : "");
 
     function showError(msg) {
       errorEl.textContent = msg;
@@ -1094,7 +1145,7 @@
           <div class="file-icon">📄</div>
           <div class="file-info">
             <div class="file-name" title="${entry.name}">${shortName(entry.name)}</div>
-            <div class="file-meta">${entry.data ? money(entry.data.grand_total) + " · " + entry.data.transaction_count + " txns" : "Loading..."}</div>
+            <div class="file-meta">${entry.data ? money(entry.data.spent_total ?? entry.data.grand_total) + " spent · " + entry.data.transaction_count + " txns" : "Loading..."}</div>
           </div>
           <button class="file-remove" title="Remove">×</button>
         `;
@@ -1110,13 +1161,13 @@
       if (files.length > 1) {
         const combinedEl = document.createElement("div");
         combinedEl.className = "file-item combined" + (activeId === "combined" ? " active" : "");
-        const total = combinedData ? money(combinedData.grand_total) : "...";
+        const total = combinedData ? money(combinedData.spent_total ?? combinedData.grand_total) : "...";
         const count = combinedData ? combinedData.transaction_count + " txns" : "";
         combinedEl.innerHTML = `
           <div class="file-icon">📊</div>
           <div class="file-info">
             <div class="file-name">All combined</div>
-            <div class="file-meta">${total}${count ? " · " + count : ""}</div>
+            <div class="file-meta">${total}${count ? " spent · " + count : ""}</div>
           </div>
         `;
         combinedEl.addEventListener("click", () => selectFile("combined"));
@@ -1255,9 +1306,9 @@
           <div class="side-txn-dot" style="background:${t.color || "#64748b"}"></div>
           <div class="side-txn-info">
             <div class="side-txn-name">${t.description}</div>
-            <div class="side-txn-meta">${t.category}${t.account ? " · " + t.account : ""}</div>
+            <div class="side-txn-meta">${t.category}${t.is_credit ? " · Credit" : ""}${t.account ? " · " + t.account : ""}</div>
           </div>
-          <div class="side-txn-amount">${money(t.amount)}</div>
+          <div class="side-txn-amount ${amountClass(t.amount)}">${signedMoney(t.amount)}</div>
         </div>
       `;
     }
@@ -1295,7 +1346,12 @@
           }
           dayDetail.innerHTML = `
             <div class="panel-label">Day details</div>
-            <div class="day-detail-header">${formatDayLabel(day.date)} · ${money(day.total)}</div>
+            <div class="day-detail-header">${formatDayLabel(day.date)}</div>
+            <div class="calendar-month-stats" style="margin:0 0 0.75rem">
+              <span>Spent <strong>${money(day.spent)}</strong></span>
+              ${day.credits ? `<span>Credits <strong class="amount-credit">${signedMoney(day.credits)}</strong></span>` : ""}
+              <span>Net <strong class="${netClass(day.net)}">${signedMoney(day.net)}</strong></span>
+            </div>
             ${day.transactions.map(renderSideTxn).join("")}
           `;
         }
@@ -1338,23 +1394,27 @@
 
     function renderResults(data, title) {
       viewTitle.textContent = shortName(title);
-      viewSubtitle.textContent = `${data.transaction_count} transactions · ${data.categories.length} active categories`;
+      viewSubtitle.textContent = `${data.charge_count ?? data.transaction_count} charges · ${data.credit_count || 0} credits · ${data.categories.length} categories`;
 
-      const maxMonthTotal = Math.max(...data.monthly.map(m => m.total), 1);
+      const maxMonthTotal = Math.max(...data.monthly.map(m => m.spent ?? m.total), 1);
 
       resultsEl.innerHTML = `
         <div class="summary-cards">
-          <div class="stat-card" style="--card-accent: #5b8def">
+          <div class="stat-card" style="--card-accent: #f87171">
             <div class="label">Total Spent</div>
-            <div class="value">${money(data.grand_total)}</div>
+            <div class="value">${money(data.spent_total ?? data.grand_total)}</div>
           </div>
           <div class="stat-card" style="--card-accent: #34d399">
-            <div class="label">Transactions</div>
-            <div class="value">${data.transaction_count}</div>
+            <div class="label">Credits / Refunds</div>
+            <div class="value">${signedMoney(data.credits_total || 0)}</div>
+          </div>
+          <div class="stat-card" style="--card-accent: #5b8def">
+            <div class="label">Net</div>
+            <div class="value ${netClass(data.net_total ?? -(data.spent_total ?? data.grand_total))}">${signedMoney(data.net_total ?? -(data.spent_total ?? data.grand_total))}</div>
           </div>
           <div class="stat-card" style="--card-accent: #a78bfa">
-            <div class="label">Active Categories</div>
-            <div class="value">${data.categories.length}</div>
+            <div class="label">Charges</div>
+            <div class="value">${data.charge_count ?? data.transaction_count}</div>
           </div>
         </div>
 
@@ -1367,7 +1427,11 @@
               <div class="month-card">
                 <div class="month-card-header">
                   <span class="month-name">${m.month}</span>
-                  <span class="month-total">${money(m.total)}</span>
+                  <div class="month-metrics">
+                    <span>Spent <strong>${money(m.spent ?? m.total)}</strong></span>
+                    <span>Credits <strong class="amount-credit">${signedMoney(m.credits || 0)}</strong></span>
+                    <span>Net <strong class="${netClass(m.net ?? -(m.spent ?? m.total))}">${signedMoney(m.net ?? -(m.spent ?? m.total))}</strong></span>
+                  </div>
                 </div>
                 <div class="month-bars">
                   ${m.categories.map(c => `
@@ -1387,8 +1451,8 @@
 
         <section>
           <div class="section-header">
-            <h3>Spending by Category</h3>
-            <span class="badge">From your export</span>
+            <h3>Charges by Category</h3>
+            <span class="badge">Negative amounts</span>
           </div>
           <div class="category-grid">
             ${data.categories.map((cat, i) => `
@@ -1397,9 +1461,9 @@
                   <div class="cat-dot" style="background:${cat.color}"></div>
                   <div class="cat-info">
                     <div class="cat-name">${cat.name}</div>
-                    <div class="cat-meta">${cat.count} transaction${cat.count !== 1 ? "s" : ""}</div>
+                    <div class="cat-meta">${cat.count} charge${cat.count !== 1 ? "s" : ""}</div>
                   </div>
-                  <span class="cat-total">${money(cat.total)}</span>
+                  <span class="cat-total amount-charge">-${money(cat.total)}</span>
                   <span class="cat-chevron">▼</span>
                 </div>
                 <div class="cat-body">
@@ -1407,7 +1471,7 @@
                     <div class="txn-row">
                       <span class="txn-date">${t.date}</span>
                       <span>${t.description}</span>
-                      <span class="txn-amount">${money(t.amount)}</span>
+                      <span class="txn-amount ${amountClass(t.amount)}">${signedMoney(t.amount)}</span>
                       ${t.account || t.source ? `<span class="txn-sub">${[t.account, t.source].filter(Boolean).join(" · ")}</span>` : ""}
                     </div>
                   `).join("")}
@@ -1416,6 +1480,38 @@
             `).join("")}
           </div>
         </section>
+
+        ${data.credits && data.credits.length ? `
+          <section>
+            <div class="section-header">
+              <h3>Credits &amp; Refunds</h3>
+              <span class="badge">Positive amounts · ${signedMoney(data.credits_total || 0)}</span>
+            </div>
+            <div class="category-grid">
+              <div class="cat-card open">
+                <div class="cat-header" onclick="this.parentElement.classList.toggle('open')">
+                  <div class="cat-dot" style="background:#34d399"></div>
+                  <div class="cat-info">
+                    <div class="cat-name">Incoming credits</div>
+                    <div class="cat-meta">${data.credit_count} transaction${data.credit_count !== 1 ? "s" : ""}</div>
+                  </div>
+                  <span class="cat-total amount-credit">${signedMoney(data.credits_total || 0)}</span>
+                  <span class="cat-chevron">▼</span>
+                </div>
+                <div class="cat-body">
+                  ${data.credits.map(t => `
+                    <div class="txn-row">
+                      <span class="txn-date">${t.date}</span>
+                      <span>${t.description}</span>
+                      <span class="txn-amount amount-credit">${signedMoney(t.amount)}</span>
+                      <span class="txn-sub">${[t.category, t.account, t.source].filter(Boolean).join(" · ")}</span>
+                    </div>
+                  `).join("")}
+                </div>
+              </div>
+            </div>
+          </section>
+        ` : ""}
 
         ${data.unused_categories && data.unused_categories.length ? `
           <section>
@@ -1439,7 +1535,11 @@
           <div class="calendar-top">
             <div class="calendar-title-block">
               <div class="spent-label">Spent in ${cal.short_label}</div>
-              <div class="spent-total">${money(cal.total)}</div>
+              <div class="spent-total">${money(cal.spent ?? cal.total)}</div>
+              <div class="calendar-month-stats">
+                <span>Credits <strong class="amount-credit">${signedMoney(cal.credits || 0)}</strong></span>
+                <span>Net <strong class="${netClass(cal.net ?? -(cal.spent ?? cal.total))}">${signedMoney(cal.net ?? -(cal.spent ?? cal.total))}</strong></span>
+              </div>
             </div>
           </div>
           <div class="calendar-layout">

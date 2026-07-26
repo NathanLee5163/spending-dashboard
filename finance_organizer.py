@@ -81,11 +81,18 @@ CATEGORY_COLORS = {
 
 def parse_amount(value: str) -> float:
     cleaned = value.strip().replace("$", "").replace(",", "")
-    return float(cleaned)
+    return round(float(cleaned), 2)
 
 
-def format_money(amount: float) -> str:
-    return f"${abs(amount):,.2f}"
+def format_money(amount: float, signed: bool = False) -> str:
+    value = f"${abs(amount):,.2f}"
+    if not signed:
+        return value
+    if amount > 0:
+        return f"+{value}"
+    if amount < 0:
+        return f"-{value}"
+    return value
 
 
 DATE_FORMATS = ("%Y-%m-%d", "%m/%d/%Y", "%m/%d/%y", "%d/%m/%Y", "%Y/%m/%d")
@@ -435,7 +442,12 @@ def load_transactions(source: Path | str | TextIO, expenses_only: bool = True) -
         raise ValueError("No rows found in CSV file.")
 
     if expenses_only:
-        rows = [row for row in rows if row.get("Type", "").strip() == "Expense"]
+        # Keep purchases and refunds; hide card payments / transfers.
+        rows = [
+            row
+            for row in rows
+            if row.get("Type", "").strip() in {"Expense", "Return"}
+        ]
 
     if not rows:
         raise ValueError(
@@ -443,6 +455,33 @@ def load_transactions(source: Path | str | TextIO, expenses_only: bool = True) -
         )
 
     return rows
+
+
+def split_by_sign(transactions: list[dict]) -> tuple[list[dict], list[dict]]:
+    charges: list[dict] = []
+    credits: list[dict] = []
+    for row in transactions:
+        amount = parse_amount(row["Amount"])
+        if amount < 0:
+            charges.append(row)
+        elif amount > 0:
+            credits.append(row)
+    return charges, credits
+
+
+def serialize_transaction(row: dict) -> dict:
+    amount = parse_amount(row["Amount"])
+    return {
+        "date": row.get("Date", ""),
+        "description": row.get("Description", ""),
+        "amount": amount,
+        "category": row.get("Category", "").strip() or "Uncategorized",
+        "color": category_color(row.get("Category", "")),
+        "account": row.get("Account", ""),
+        "source": row.get("_source", ""),
+        "type": row.get("Type", ""),
+        "is_credit": amount > 0,
+    }
 
 
 def group_by_category(transactions: list[dict]) -> dict[str, list[dict]]:
@@ -482,20 +521,16 @@ def category_color(name: str) -> str:
 
 
 def build_category_entry(name: str, items: list[dict]) -> dict:
+    total = category_total(items)
     return {
         "name": name,
-        "total": abs(category_total(items)),
+        "total": abs(total),
+        "signed_total": total,
         "count": len(items),
         "color": category_color(name),
         "used": len(items) > 0,
         "transactions": [
-            {
-                "date": row.get("Date", ""),
-                "description": row.get("Description", ""),
-                "amount": abs(parse_amount(row["Amount"])),
-                "account": row.get("Account", ""),
-                "source": row.get("_source", ""),
-            }
+            serialize_transaction(row)
             for row in sorted(items, key=lambda row: row.get("Date", ""), reverse=True)
         ],
     }
@@ -542,43 +577,46 @@ def build_calendar_summaries(transactions: list[dict]) -> list[dict]:
         for day_num in range(1, days_in_month + 1):
             date_str = f"{month}-{day_num:02d}"
             items = by_month[month].get(date_str, [])
-            total = sum(abs(parse_amount(item["Amount"])) for item in items)
+            charges = [item for item in items if parse_amount(item["Amount"]) < 0]
+            credits = [item for item in items if parse_amount(item["Amount"]) > 0]
+            spent = round(sum(abs(parse_amount(item["Amount"])) for item in charges), 2)
+            credited = round(sum(parse_amount(item["Amount"]) for item in credits), 2)
+            net = round(category_total(items), 2)
             days.append(
                 {
                     "date": date_str,
                     "day": day_num,
-                    "total": total,
+                    "total": spent,
+                    "spent": spent,
+                    "credits": credited,
+                    "net": net,
                     "count": len(items),
                     "transactions": [
-                        {
-                            "date": date_str,
-                            "description": item.get("Description", ""),
-                            "amount": abs(parse_amount(item["Amount"])),
-                            "category": item.get("Category", "") or "Uncategorized",
-                            "color": category_color(item.get("Category", "")),
-                            "account": item.get("Account", ""),
-                            "source": item.get("_source", ""),
-                        }
-                        for item in sorted(items, key=lambda row: row.get("Description", ""))
+                        serialize_transaction(item)
+                        for item in sorted(
+                            items,
+                            key=lambda row: (parse_amount(row["Amount"]) > 0, row.get("Description", "")),
+                        )
                     ],
                 }
             )
 
-        recent: list[dict] = []
-        for day in sorted(days, key=lambda item: item["date"], reverse=True):
-            recent.extend(day["transactions"])
-        recent = recent[:12]
+        month_spent = round(sum(day["spent"] for day in days), 2)
+        month_credits = round(sum(day["credits"] for day in days), 2)
+        month_net = round(sum(day["net"] for day in days), 2)
 
         calendars.append(
             {
                 "month": month,
                 "label": datetime(year, mon, 1).strftime("%B %Y"),
                 "short_label": datetime(year, mon, 1).strftime("%B").upper(),
-                "total": sum(day["total"] for day in days),
+                "total": month_spent,
+                "spent": month_spent,
+                "credits": month_credits,
+                "net": month_net,
                 "first_weekday": first_weekday,
                 "days_in_month": days_in_month,
                 "days": days,
-                "recent": recent,
             }
         )
 
@@ -586,27 +624,61 @@ def build_calendar_summaries(transactions: list[dict]) -> list[dict]:
 
 
 def analyze(transactions: list[dict]) -> dict:
-    grouped = group_by_category(transactions)
+    charges, credits = split_by_sign(transactions)
+    grouped = group_by_category(charges)
     all_cats = full_category_list(grouped)
     used_categories = [cat for cat in all_cats if cat["used"]]
     unused_categories = [cat for cat in all_cats if not cat["used"]]
-    grand_total = sum(cat["total"] for cat in used_categories)
+
+    spent_total = round(sum(abs(parse_amount(row["Amount"])) for row in charges), 2)
+    credits_total = round(sum(parse_amount(row["Amount"]) for row in credits), 2)
+    net_total = round(category_total(transactions), 2)
 
     monthly_raw = build_monthly_summary(transactions)
     monthly = []
     for month, totals in monthly_raw.items():
-        month_total = abs(totals.pop("_total", 0.0))
+        month_net = round(totals.pop("_total", 0.0), 2)
+        month_rows = [row for row in transactions if parse_month(row.get("Date", "")) == month]
+        month_charges, month_credits = split_by_sign(month_rows)
+        month_spent = round(sum(abs(parse_amount(row["Amount"])) for row in month_charges), 2)
+        month_credited = round(sum(parse_amount(row["Amount"]) for row in month_credits), 2)
+
+        charge_totals: dict[str, float] = defaultdict(float)
+        for row in month_charges:
+            category = row.get("Category", "").strip() or "Uncategorized"
+            charge_totals[category] += abs(parse_amount(row["Amount"]))
+
         breakdown = [
-            {"category": category, "total": abs(amount), "color": category_color(category)}
-            for category, amount in sorted(totals.items(), key=lambda item: abs(item[1]), reverse=True)
+            {"category": category, "total": round(amount, 2), "color": category_color(category)}
+            for category, amount in sorted(charge_totals.items(), key=lambda item: item[1], reverse=True)
         ]
-        monthly.append({"month": month, "total": month_total, "categories": breakdown})
+        monthly.append(
+            {
+                "month": month,
+                "total": month_spent,
+                "spent": month_spent,
+                "credits": month_credited,
+                "net": month_net,
+                "categories": breakdown,
+            }
+        )
+
+    credit_transactions = [
+        serialize_transaction(row)
+        for row in sorted(credits, key=lambda row: row.get("Date", ""), reverse=True)
+    ]
 
     return {
-        "grand_total": abs(grand_total),
+        "grand_total": spent_total,
+        "spent_total": spent_total,
+        "credits_total": credits_total,
+        "net_total": net_total,
         "transaction_count": len(transactions),
+        "charge_count": len(charges),
+        "credit_count": len(credits),
         "categories": used_categories,
         "unused_categories": unused_categories,
+        "credits": credit_transactions,
         "all_categories": STANDARD_CATEGORIES,
         "monthly": monthly,
         "calendars": build_calendar_summaries(transactions),
@@ -673,17 +745,21 @@ def export_excel(transactions: list[dict], output: Path | BinaryIO) -> None:
     from openpyxl import Workbook
     from openpyxl.styles import Font, PatternFill
 
-    grouped = group_by_category(transactions)
+    charges, credits = split_by_sign(transactions)
+    grouped = group_by_category(charges)
     analysis = analyze(transactions)
 
     workbook = Workbook()
 
     summary_sheet = workbook.active
     summary_sheet.title = "Category Summary"
-    summary_sheet.append(["Category", "Transactions", "Total"])
+    summary_sheet.append(["Category", "Transactions", "Spent"])
     for category in analysis["categories"]:
         summary_sheet.append([category["name"], category["count"], category["total"]])
-    summary_sheet.append(["GRAND TOTAL", analysis["transaction_count"], analysis["grand_total"]])
+    summary_sheet.append([])
+    summary_sheet.append(["Total Spent", analysis["charge_count"], analysis["spent_total"]])
+    summary_sheet.append(["Total Credits", analysis["credit_count"], analysis["credits_total"]])
+    summary_sheet.append(["Net", analysis["transaction_count"], analysis["net_total"]])
 
     header_font = Font(bold=True, color="FFFFFF")
     header_fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
@@ -695,26 +771,51 @@ def export_excel(transactions: list[dict], output: Path | BinaryIO) -> None:
         summary_sheet.column_dimensions[column].width = 24 if column == "A" else 16
     for row in summary_sheet.iter_rows(min_row=2, min_col=3, max_col=3):
         for cell in row:
-            cell.number_format = "$#,##0.00"
+            if isinstance(cell.value, (int, float)):
+                cell.number_format = '$#,##0.00;$ (#,##0.00);"-"'
 
     monthly_sheet = workbook.create_sheet("Monthly Summary")
-    monthly_sheet.append(["Month", "Category", "Total"])
+    monthly_sheet.append(["Month", "Category", "Spent", "Credits", "Net"])
     for entry in analysis["monthly"]:
         for item in entry["categories"]:
-            monthly_sheet.append([entry["month"], item["category"], item["total"]])
-        monthly_sheet.append([entry["month"], "MONTH TOTAL", entry["total"]])
+            monthly_sheet.append([entry["month"], item["category"], item["total"], "", ""])
+        monthly_sheet.append(
+            [entry["month"], "MONTH TOTAL", entry["spent"], entry["credits"], entry["net"]]
+        )
         monthly_sheet.append([])
 
     for cell in monthly_sheet[1]:
         cell.font = header_font
         cell.fill = header_fill
-    monthly_sheet.column_dimensions["A"].width = 14
-    monthly_sheet.column_dimensions["B"].width = 28
-    monthly_sheet.column_dimensions["C"].width = 16
-    for row in monthly_sheet.iter_rows(min_row=2, min_col=3, max_col=3):
+    for column, width in (("A", 14), ("B", 28), ("C", 14), ("D", 14), ("E", 14)):
+        monthly_sheet.column_dimensions[column].width = width
+    for row in monthly_sheet.iter_rows(min_row=2, min_col=3, max_col=5):
         for cell in row:
             if isinstance(cell.value, (int, float)):
-                cell.number_format = "$#,##0.00"
+                cell.number_format = '$#,##0.00;$ (#,##0.00);"-"'
+
+    if credits:
+        credit_sheet = workbook.create_sheet("Credits")
+        credit_sheet.append(["Date", "Description", "Category", "Amount", "Account"])
+        for cell in credit_sheet[1]:
+            cell.font = header_font
+            cell.fill = header_fill
+        for row in sorted(credits, key=lambda item: item.get("Date", ""), reverse=True):
+            credit_sheet.append(
+                [
+                    row.get("Date", ""),
+                    row.get("Description", ""),
+                    row.get("Category", "") or "Uncategorized",
+                    parse_amount(row["Amount"]),
+                    row.get("Account", ""),
+                ]
+            )
+        for column, width in (("A", 14), ("B", 36), ("C", 24), ("D", 14), ("E", 42)):
+            credit_sheet.column_dimensions[column].width = width
+        for excel_row in credit_sheet.iter_rows(min_row=2, min_col=4, max_col=4):
+            for cell in excel_row:
+                if isinstance(cell.value, (int, float)):
+                    cell.number_format = "$#,##0.00"
 
     for category_name in sorted_categories(grouped):
         safe_name = category_name[:31].replace("/", "-")
@@ -730,12 +831,12 @@ def export_excel(transactions: list[dict], output: Path | BinaryIO) -> None:
                 [
                     row.get("Date", ""),
                     row.get("Description", ""),
-                    abs(parse_amount(row["Amount"])),
+                    parse_amount(row["Amount"]),
                     row.get("Account", ""),
                 ]
             )
         sheet.append([])
-        sheet.append(["", "CATEGORY TOTAL", abs(category_total(items)), ""])
+        sheet.append(["", "CATEGORY TOTAL", category_total(items), ""])
 
         sheet.column_dimensions["A"].width = 14
         sheet.column_dimensions["B"].width = 36
@@ -744,7 +845,7 @@ def export_excel(transactions: list[dict], output: Path | BinaryIO) -> None:
         for excel_row in sheet.iter_rows(min_row=2, min_col=3, max_col=3):
             for cell in excel_row:
                 if isinstance(cell.value, (int, float)):
-                    cell.number_format = "$#,##0.00"
+                    cell.number_format = '$#,##0.00;$ (#,##0.00);"-"'
 
     if isinstance(output, Path):
         workbook.save(output)
