@@ -4,6 +4,8 @@ Upload bank CSV exports and organize your spending by category — with monthly 
 
 Works with exports from **Chase**, **Bank of America**, **Capital One**, **American Express**, and budgeting apps like **Monarch** and **Mint**.
 
+Built with a **Flask** (Python) backend and a **React** frontend bundled with **Vite**.
+
 ---
 
 ## What it does
@@ -12,7 +14,8 @@ Drop in a transaction CSV from your bank or budgeting app and the dashboard will
 
 - **Group transactions by category** (Groceries, Dining, Shopping, etc.)
 - **Show totals per category** with every transaction listed underneath
-- **Summarize spending by month** with bar charts
+- **Summarize spending by month** with bar charts, showing spent, credits, and net for each month
+- **Show a spending calendar** — a heat map of daily spending; click a day to see its transactions
 - **Support multiple CSV files** — add April, May, Chase, BofA, etc. in the sidebar and switch between them or view a combined total
 - **Export to Excel** with separate sheets per category
 - **Show unused categories** — common categories your bank supports but you didn't spend in during that period
@@ -41,6 +44,8 @@ python3 app.py
 ```
 
 Open **http://127.0.0.1:5001** in your browser.
+
+The built frontend (`static/dist/`) is committed, so you don't need Node.js just to run the app. You only need it to change the UI (see [Frontend development](#frontend-development)).
 
 ### 3. Upload your CSV
 
@@ -75,13 +80,36 @@ python organize_transactions.py your-file.csv --all
 
 ## Frontend development
 
-The UI is a React app in `frontend/`. The built files in `static/dist/` are committed, so running or deploying the Flask app needs no Node. After changing anything in `frontend/`, rebuild them and commit the result:
+The UI is a React 18 app in `frontend/`, built with Vite. Flask serves `templates/index.html`, a short page shell that loads the built `static/dist/app.js` and `static/dist/app.css`. Those built files are committed, so running or deploying the Flask app needs no Node.
+
+**Where things live**
+
+- `frontend/src/main.jsx` — entry point; mounts `<App />`
+- `frontend/src/components/` — one `.jsx` file per component (`App`, `Sidebar`, `Results`, `SpendingCalendar`, …)
+- `frontend/src/styles.css` — all styles
+- `frontend/src/format.js`, `frontend/src/hooks/` — shared helpers
+
+**Live reload while editing**
 
 ```bash
-cd frontend && npm install && npm run build
+# Terminal 1 — the API
+python3 app.py
+
+# Terminal 2 — the UI
+cd frontend
+npm install        # first time only
+npm run dev
 ```
 
-For live reload while editing, start Flask (`python3 app.py`) and, in a second terminal, run `npm run dev` in `frontend/`. Vite forwards `/api` requests to Flask on port 5001.
+Open the URL Vite prints (usually **http://localhost:5173**). Vite forwards `/api` requests to Flask on port 5001.
+
+**Rebuild before committing**
+
+The Flask app only serves what is in `static/dist/`, so after changing anything in `frontend/`, rebuild and commit the result along with your source changes:
+
+```bash
+cd frontend && npm run build
+```
 
 ---
 
@@ -145,7 +173,15 @@ spending-dashboard/
 ├── templates/
 │   └── index.html          # Page shell that loads the built UI
 ├── frontend/               # React UI source (Vite)
-│   └── src/components/     # One file per component
+│   ├── index.html          # Dev-server page (npm run dev only)
+│   ├── package.json
+│   ├── vite.config.js      # Builds to ../static/dist, proxies /api to Flask
+│   └── src/
+│       ├── main.jsx        # Entry point
+│       ├── styles.css      # All styles
+│       ├── format.js       # Formatting helpers (money, dates, file names)
+│       ├── hooks/          # Shared React hooks
+│       └── components/     # One file per component
 ├── static/dist/            # Built UI (app.js, app.css), committed
 ├── requirements.txt
 ├── Procfile                # For deployment (Render, Railway, etc.)
