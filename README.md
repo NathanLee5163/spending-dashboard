@@ -73,6 +73,18 @@ python organize_transactions.py your-file.csv --all
 
 ---
 
+## Frontend development
+
+The UI is a React app in `frontend/`. The built files in `static/dist/` are committed, so running or deploying the Flask app needs no Node. After changing anything in `frontend/`, rebuild them and commit the result:
+
+```bash
+cd frontend && npm install && npm run build
+```
+
+For live reload while editing, start Flask (`python3 app.py`) and, in a second terminal, run `npm run dev` in `frontend/`. Vite forwards `/api` requests to Flask on port 5001.
+
+---
+
 ## How to export a CSV from your bank
 
 ### Chase
@@ -131,7 +143,10 @@ spending-dashboard/
 ├── finance_organizer.py    # Core CSV parsing, analysis, Excel export
 ├── organize_transactions.py # CLI tool
 ├── templates/
-│   └── index.html          # Web UI
+│   └── index.html          # Page shell that loads the built UI
+├── frontend/               # React UI source (Vite)
+│   └── src/components/     # One file per component
+├── static/dist/            # Built UI (app.js, app.css), committed
 ├── requirements.txt
 ├── Procfile                # For deployment (Render, Railway, etc.)
 └── README.md
@@ -152,6 +167,7 @@ spending-dashboard/
 
 - Python 3.10+
 - Dependencies: `flask`, `openpyxl`, `gunicorn` (see `requirements.txt`)
+- Node.js 20.19+ or 22.12+ (only to rebuild the frontend)
 
 ---
 
